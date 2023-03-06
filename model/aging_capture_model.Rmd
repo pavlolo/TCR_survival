@@ -1,0 +1,104 @@
+---
+title: "aging"
+author: "M.S."
+date: '2023-02-21'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+PATH <- function(x) paste0("../data/aging_3year/", x)
+```
+
+```{r}
+meta <- read_tsv(PATH("metadata.txt"))
+meta
+```
+
+```{r}
+data <- meta %>%
+  group_by(donor, age) %>%
+  group_modify(~read_tsv(PATH(.x$file.name))) %>%
+  ungroup %>%
+  mutate(tcrkey = paste(v, cdr3nt)) %>%
+  group_by(donor, age, tcrkey) %>%
+  summarise(count = sum(count)) %>%
+  ungroup
+```
+
+```{r}
+BEFORE = c(27, 47)
+AFTER = c(30, 50)
+
+data.s <- data %>%
+  group_by(donor, age) %>%
+  summarise(total.count = sum(count), 
+            total.clones = n()) %>%
+  ungroup
+
+data.s.1 <- inner_join(
+  data.s %>%
+    filter(age %in% BEFORE) %>%
+    select(-age) %>%
+    rename(Nr = total.count,
+           N = total.clones),
+  data.s %>%
+    filter(age %in% AFTER) %>%
+    select(-age) %>%
+    rename(Mr = total.count,
+           M = total.clones)
+)
+
+data.s
+
+log10(data.s$total.clones)
+log10(data.s$total.count)
+```
+
+```{r}
+data.m <- data %>% 
+  filter(age %in% BEFORE) %>%
+  select(-age) %>%
+  left_join(data %>% 
+              filter(age %in% AFTER) %>%
+              select(-age),
+            by = c("donor", "tcrkey")) %>%
+  mutate(count.y = ifelse(is.na(count.y), 0 , count.y))
+```
+
+$$
+\log\left(1 - p_s\right) = \frac{M}{n_sN} \left(\frac{1}{(1+\beta)^{s+1}} - 1\right), \beta > 0
+$$
+
+$$
+p_s = 1 - exp\left(\frac{M}{n_sN} \left(\frac{1}{(1+\beta)^{s+1}} - 1\right)\right)
+$$
+
+```{r}
+beta <- 1
+alpha <- 1
+data.m.s <- data.m %>%
+  mutate(size = count.x, found = count.y > 0) %>%
+  filter(size <= 25) %>%
+  group_by(donor, size) %>%
+  summarise(p = mean(found), n = n()) %>%
+  group_by(donor) %>%
+  mutate(n_uns = n[which(size == 1)] ^ 2 / 2 / n[which(size == 2)]) %>%
+  left_join(data.s.1) %>%
+  mutate(ptheor = (1 - ((beta + n) / (beta + n + Mr / Nr)) ^ (alpha + size * n)))
+
+data.m.s %>%
+  ggplot(aes(x = size)) +
+  geom_point(aes(y = p, color = donor)) +
+  geom_path(aes(y = ptheor , color = donor)) +
+  scale_color_brewer(palette = "Set1") +
+  scale_y_log10("P(capture)") +
+  scale_x_continuous("Species size", limits = c(0, 24)) +
+  theme_classic() +
+  theme(aspect = 1)
+```
+
+```{r}
+```
